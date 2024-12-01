@@ -141,9 +141,11 @@ touch mychart/templates/configmap.yaml # etc.... (follow tutorial)
 
 ## Dask
 
-I downloaded the [Helm templates](https://helm.dask.org/) referenced in [this](https://medium.com/@mucagriaktas/creating-dask-with-dask-operator-using-kubecluster-and-helm-f62a03f4814b) and [this](https://medium.com/@varunrathod0045/dask-on-kubernetes-part-1-71b452bef081) Medium tutorial. Starting from [Github](https://github.com/dask/helm-chart) eventually leads to [Charts](https://artifacthub.io/packages/helm/dask/dask) so pretty much the same "Artifactory".
+I downloaded the [Helm templates](https://artifacthub.io/packages/helm/dask/dask-kubernetes-operator) referenced in [this](https://medium.com/@mucagriaktas/creating-dask-with-dask-operator-using-kubecluster-and-helm-f62a03f4814b) and [this](https://medium.com/@varunrathod0045/dask-on-kubernetes-part-1-71b452bef081) Medium tutorial.
 
-I theorize that the Docker containers do similar things to the ["manual" approach](https://distributed.dask.org/en/stable/quickstart.html):
+Confusingly, there is another set of Helm Templates just called [dask](https://artifacthub.io/packages/helm/dask/dask) that I chanced upon when looking at Dask's [Github](https://github.com/dask/helm-chart?tab=readme-ov-file). For now we focus on the actual Dask Kubernetes Operator and its [documentation](https://kubernetes.dask.org/en/latest/)
+
+I theorize that those Docker containers/ k8s do conceptually the same thing as the ["manual" approach](https://distributed.dask.org/en/stable/quickstart.html) with schedulers and workers on the same address:
 
 ```bash
 # https://stackoverflow.com/questions/73974735/conda-update-conda-does-not-update-conda
@@ -154,8 +156,16 @@ conda install dask distributed -c conda-forge
 
 # then follow the website
 dask scheduler
+> 127.0.0.1:8786
 
 dask worker 127.0.0.1:8786
 dask worker 127.0.0.1:8786
 dask worker 127.0.0.1:8786 # as many workers as needed
+```
+
+And then in Python:
+
+```python
+from dask.distributed import Client
+client = Client('127.0.0.1:8786')
 ```
