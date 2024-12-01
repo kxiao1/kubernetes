@@ -94,11 +94,17 @@ One can extend Kubernetes by defining custom resources and custom controllers th
 > Kubernetes' operator pattern concept lets you extend the cluster's behaviour without modifying the code of Kubernetes itself by linking controllers to one or more custom resources.  
 Operators are clients of the Kubernetes API that act as controllers for a Custom Resource.
 
-You first create [Custom Resource Definitions](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/), and then label templates with ``kind: CustomResourceName``. This is referenced in the [Concepts](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/#customresourcedefinitions) page, but [down the same page](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/#accessing-a-custom-resource) it is also curiously mentioned that
+Here's an [online tutorial](https://dev.to/thenjdevopsguy/creating-a-custom-resource-definition-in-kubernetes-2k7o) with a toy example of a custom resource.
+
+If I understand it correctly, you first create [Custom Resource Definitions](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/), and then label templates with ``kind: CustomResourceName``. This is referenced in the [Concepts](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/#customresourcedefinitions) page, but [down the same page](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/#accessing-a-custom-resource) it is also curiously mentioned that
 
 > Kubernetes client libraries can be used to access custom resources. Not all client libraries support custom resources. The Go and Python client libraries do.
 
-Anyway, I found an [online tutorial](https://dev.to/thenjdevopsguy/creating-a-custom-resource-definition-in-kubernetes-2k7o) with a toy example of a custom resource.
+Custom controllers seem to be optional, unless you want to do something additional to the resource when particular Kubernetes API's are invoked. To do that you'll need to write code with a client library, e.g. [Go](https://medium.com/@disha.20.10/building-and-extending-kubernetes-a-writing-first-custom-controller-with-go-bc57a50d61f7), hence the cryptic comment above. From the [official docs](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/#deploying-operators):
+
+> The most common way to deploy an operator is to add the Custom Resource Definition and its associated Controller to your cluster.  
+The Controller will normally run outside of the control plane, much as you would run any containerized application.  
+For example, you can run the controller in your cluster as a Deployment.
 
 See also Kubernetes' built-in controllers e.g. Deployment, StatefulSet: [Workload Management](https://kubernetes.io/docs/concepts/workloads/controllers/).
 
@@ -174,20 +180,41 @@ Confusingly, there is another set of Helm Templates just called [dask](https://a
 # https://stackoverflow.com/questions/73974735/conda-update-conda-does-not-update-conda
 conda install -n base conda=24.9.2
 
+# This is required to define the KubeCluster object in Python. 
+# Otherwise, run kubectl as we do below and connect the client manually.
 conda install dask-kubernetes -c conda-forge
 
+# Start Kubernetes and install the CRD's etc
 minikube start --driver=docker
+helm install dask-kubernetes-operator-loc dask-kubernetes-operator/ # use local templates in this repo
 
-helm install dask-kubernetes-operator-loc dask-kubernetes-operator/ # use templates in this repo
+# Start a new cluster
+kubectl apply -f cluster.yaml # see https://kubernetes.dask.org/en/latest/operator_resources.html#daskcluster
+kubectl get svc -l dask.org/cluster-name=simple
+kubectl port-forward svc/simple-scheduler 8786:8786 # port forwarding
+
+# Talk to the dask cluster from a new terminal
+conda activate # base, venv etc...
+python client.py
 ```
 
-I theorize that those Docker/ Kubernetes/ Operator solutions do conceptually the same thing as the ["manual" approach](https://distributed.dask.org/en/stable/quickstart.html) with schedulers and workers on the same address:
+``client.py`` calls ``dask.distributed`` to connect to the cluster:
+
+```python
+from dask.distributed import Client
+client = Client("localhost:8786")
+print(client)
+```
+
+so be sure to install ``dask.distributed`` as follows:
 
 ```bash
-conda install dask
-conda install dask distributed -c conda-forge
+conda install dask distributed -c conda-forge 
+```
 
-# then follow the website
+I theorize that those Docker/ Kubernetes/ Operator solutions do conceptually the same thing as the ["manual" approach](https://distributed.dask.org/en/stable/quickstart.html) with workers registering themselves at the scheduler's address:
+
+```bash
 dask scheduler
 > 127.0.0.1:8786
 
