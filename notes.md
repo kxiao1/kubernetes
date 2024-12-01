@@ -65,6 +65,7 @@ At this point I noticed that my ``kubernetes-bootcamp`` deployment has been runn
 To delete those pods and start over,
 
 ```bash
+kubectl scale deployment kubernetes-bootcamp --replicas=0 # https://www.baeldung.com/ops/kubernetes-stop-pause
 kubectl delete pod kubernetes-bootcamp-57978f5f5d-qx7qr
 
 # OR
@@ -80,6 +81,27 @@ kubectl create deployment hello-node --image=registry.k8s.io/e2e-test-images/agn
 kubectl delete deployment hello-node
 ```
 
+### Other main concepts in the tutorial
+
+Overview ([Viewing Pods and Node](https://kubernetes.io/docs/tutorials/kubernetes-basics/explore/explore-intro/))
+> A __Pod__ is a group of one or more application containers (such as Docker) and includes shared storage (volumes), IP address and information about how to run them.  
+A Pod always runs on a __Node__. A Node is a worker machine in Kubernetes and may be either a virtual or a physical machine, depending on the cluster. Each Node is managed by the control plane.
+
+### Beyond the tutorial
+
+One can extend Kubernetes by defining custom resources and custom controllers that operate on them. This is known as the [operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/) of which the [__Dask Kubernetes Operator__](#dask) is a prime example.
+
+> Kubernetes' operator pattern concept lets you extend the cluster's behaviour without modifying the code of Kubernetes itself by linking controllers to one or more custom resources.  
+Operators are clients of the Kubernetes API that act as controllers for a Custom Resource.
+
+You first create [Custom Resource Definitions](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/), and then label templates with ``kind: CustomResourceName``. This is referenced in the [Concepts](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/#customresourcedefinitions) page, but [down the same page](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/#accessing-a-custom-resource) it is also curiously mentioned that
+
+> Kubernetes client libraries can be used to access custom resources. Not all client libraries support custom resources. The Go and Python client libraries do.
+
+Anyway, I found an [online tutorial](https://dev.to/thenjdevopsguy/creating-a-custom-resource-definition-in-kubernetes-2k7o) with a toy example of a custom resource.
+
+See also Kubernetes' built-in controllers e.g. Deployment, StatefulSet: [Workload Management](https://kubernetes.io/docs/concepts/workloads/controllers/).
+
 ## Helm
 
 A Helm chart resembles a Dockerfile. It uses values and templates to manage Kubernetes deployments. The outermost file ``Chart.yaml`` seems kind of useless.
@@ -94,6 +116,8 @@ This is mentioned somewhat obliquely on the [Kubernetes side](https://kubernetes
 Multiple resources can be created the same way as a single resource:  
 ```kubectl apply -f https://k8s.io/examples/application/nginx-app.yaml```  
 ... The resources will be created in the order they appear in the __manifest__.
+
+This page shouldn't be under Workloads since it also mentions services, but Kubernetes documentation isn't super well-organized as a whole.
 
 ### Installation ([ref](https://helm.sh/docs/intro/install/#from-script))
 
@@ -143,14 +167,23 @@ touch mychart/templates/configmap.yaml # etc.... (follow tutorial)
 
 I downloaded the [Helm templates](https://artifacthub.io/packages/helm/dask/dask-kubernetes-operator) referenced in [this](https://medium.com/@mucagriaktas/creating-dask-with-dask-operator-using-kubecluster-and-helm-f62a03f4814b) and [this](https://medium.com/@varunrathod0045/dask-on-kubernetes-part-1-71b452bef081) Medium tutorial.
 
-Confusingly, there is another set of Helm Templates just called [dask](https://artifacthub.io/packages/helm/dask/dask) that I chanced upon when looking at Dask's [Github](https://github.com/dask/helm-chart?tab=readme-ov-file). For now we focus on the actual Dask Kubernetes Operator and its [documentation](https://kubernetes.dask.org/en/latest/)
-
-I theorize that those Docker containers/ k8s do conceptually the same thing as the ["manual" approach](https://distributed.dask.org/en/stable/quickstart.html) with schedulers and workers on the same address:
+Confusingly, there is another set of Helm Templates just called [dask](https://artifacthub.io/packages/helm/dask/dask) that I chanced upon when looking at Dask's [Github](https://github.com/dask/helm-chart?tab=readme-ov-file). For now we focus on the actual __Dask Kubernetes Operator__ and its [documentation](https://kubernetes.dask.org/en/latest/).
 
 ```bash
+# I had to fix my conda (it was version 4.14...)
 # https://stackoverflow.com/questions/73974735/conda-update-conda-does-not-update-conda
 conda install -n base conda=24.9.2
 
+conda install dask-kubernetes -c conda-forge
+
+minikube start --driver=docker
+
+helm install dask-kubernetes-operator-loc dask-kubernetes-operator/ # use templates in this repo
+```
+
+I theorize that those Docker/ Kubernetes/ Operator solutions do conceptually the same thing as the ["manual" approach](https://distributed.dask.org/en/stable/quickstart.html) with schedulers and workers on the same address:
+
+```bash
 conda install dask
 conda install dask distributed -c conda-forge
 
