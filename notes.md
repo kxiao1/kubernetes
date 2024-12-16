@@ -92,7 +92,7 @@ A Pod always runs on a __Node__. A Node is a worker machine in Kubernetes and ma
 
 \#TODO
 
-### Real-world Kubernetes: Services
+### Real-world Kubernetes I: Services
 
 This section and the next address the burning question: How do pods talk to one another across nodes (e.g. internal clients) and with public-IP clients?
 
@@ -182,7 +182,7 @@ sudo dpkg -i ~/k9s_linux_amd64.deb
 
 This saves us from remembering Kubernetes (i.e. k8s) commands when configuring real-world deployments. For now, I prefer writing commands to pasting k9s screenshots.
 
-When the container's ports are exposed (e.g. ``containerPort: 80``), Kubernetes ensure that pods can talk to one another within a cluster (this is also true across nodes but we cannot see this effect using the single node on Minikube). The [tutorial](https://kubernetes.io/docs/tutorials/services/connect-applications-service/) provides this example:
+When the container's ports are exposed (e.g. ``containerPort: 80``), Kubernetes ensures that pods can talk to one another _within_ a cluster (this is also true across nodes but we cannot see this effect using the single node on Minikube). Each pod posseses However, that they are located by __Virtual IP__ addresses The [tutorial](https://kubernetes.io/docs/tutorials/services/connect-applications-service/)'s example should clarify:
 
 ```console
 $ tail .networking/run-my-nginx.yaml
@@ -198,9 +198,12 @@ $ tail .networking/run-my-nginx.yaml
             - containerPort: 80
 
 $ kubectl apply -f ./networking/run-my-nginx.yaml
+deployment.apps/my-nginx created
+
 $ kubectl get pods -l run=my-nginx -o wide
-NAME                        READY     STATUS    RESTARTS   AGE       IP            NODE
-...
+NAME                        READY   STATUS    RESTARTS   AGE   IP           NODE       NOMINATED NODE   READINESS GATES
+my-nginx-5b56ccd65f-5jjv4   1/1     Running   0          21s   172.17.0.10   minikube   <none>           <none>
+my-nginx-5b56ccd65f-h69vc   1/1     Running   0          21s   172.17.0.11   minikube   <none>           <none>
 
 $ kubectl get pods -l run=my-nginx -o custom-columns=POD_IP:.status.podIPs
 POD_IP
@@ -227,7 +230,7 @@ We can do better by adding a ``Service`` layer to abstract out the individual po
 ```console
 $ head networking/nginx-svc.yaml
 apiVersion: v1
-kind: Service
+kind: Service <--
 metadata:
   name: my-nginx
   labels:
@@ -279,7 +282,7 @@ $ exit
 
 The translation between service and pods is performed by ``kube-proxy``. See for instance [here](https://medium.com/@amroessameldin/kube-proxy-what-is-it-and-how-it-works-6def85d9bc8f).
 
-### Real-world Kubernetes: Ingress
+### Real-world Kubernetes II: Ingresses
 
 The last piece of the puzzle is exposing our service to the outside world. We're going to give a hat tip to ``nginx`` again for providing with open-source software that not only serves as good tutorial material, but more importantly actually helps websites run.
 
@@ -287,10 +290,310 @@ First, a word about [controllers](https://kubernetes.io/docs/concepts/architectu
 
 > In Kubernetes, controllers are control loops that watch the state of your cluster, then make or request changes where needed. Each controller tries to move the current cluster state closer to the desired state.
 
-TODO:
+In our context, we need something that listens for external requests and informs the cluster. What Kubernetes calls an [``Ingress``](https://kubernetes.io/docs/concepts/services-networking/ingress/) combines elements of a load balancer and reverse proxy to act as a "gateway" to the service. I added the speech marks because with the cutting-edge [``Gateway API``](https://kubernetes.io/docs/concepts/services-networking/gateway/), one must be careful to avoid name conflicts. The [Ingress docs](https://kubernetes.io/docs/concepts/services-networking/ingress/#what-is-ingress) go on to introduce more terminology:
 
-- [k8s](https://kubernetes.io/docs/concepts/services-networking/ingress/)
-- [ingress-nginx](https://kubernetes.github.io/ingress-nginx/deploy/#quick-start)
+> An __Ingress controller__ is responsible for fulfilling the __Ingress__, usually with a load balancer, though it may also configure your edge router or additional frontends to help handle the traffic.
+
+Thus, the functionality or concept of an Ingress is provided as a controller.
+
+The [ingress-nginx tutorial](https://kubernetes.github.io/ingress-nginx/deploy/#quick-start) recommends installing an Ingress Controller with ``Helm``, a tool I cover in the next section. The Helm command masks the actual specification, so I first tried the K8s native method. After downloading the manifest, I extracted what looked to be the relevant parts:
+
+```console
+$ tail -n 50 ./networking/ingress.yaml
+        kubernetes.io/os: linux
+      restartPolicy: OnFailure
+      serviceAccountName: ingress-nginx-admission
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: ingress-nginx
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+    app.kubernetes.io/version: 1.12.0-beta.0
+  name: nginx
+spec:
+  controller: k8s.io/ingress-nginx
+
+---
+...
+
+
+```
+
+The manifest defines an ``IngressClass`` - a specific configuration for the controller - rather than the Ingress resource itself (e.g. [AWS](https://kubernetes-sigs.github.io/aws-load-balancer-controller/v2.2/guide/ingress/ingress_class/)). Further down, we will create the actual Ingress (with the line ``kind: Ingress``) itself. Now we apply the YAML file:
+
+```console
+$ kubectl apply -f networking/ingress.yaml
+namespace/ingress-nginx created
+serviceaccount/ingress-nginx created
+serviceaccount/ingress-nginx-admission created
+role.rbac.authorization.k8s.io/ingress-nginx created
+role.rbac.authorization.k8s.io/ingress-nginx-admission created
+clusterrole.rbac.authorization.k8s.io/ingress-nginx created
+clusterrole.rbac.authorization.k8s.io/ingress-nginx-admission created
+rolebinding.rbac.authorization.k8s.io/ingress-nginx created
+rolebinding.rbac.authorization.k8s.io/ingress-nginx-admission created
+clusterrolebinding.rbac.authorization.k8s.io/ingress-nginx created
+clusterrolebinding.rbac.authorization.k8s.io/ingress-nginx-admission created
+configmap/ingress-nginx-controller created
+service/ingress-nginx-controller created
+service/ingress-nginx-controller-admission created
+deployment.apps/ingress-nginx-controller created
+job.batch/ingress-nginx-admission-create created
+job.batch/ingress-nginx-admission-patch created
+ingressclass.networking.k8s.io/nginx created
+validatingwebhookconfiguration.admissionregistration.k8s.io/ingress-nginx-admission created
+```
+
+Among other things, we see two ``Service``s and a ``Deployment`` (actually one of Kubernetes' built-in Controllers) being created. As for the rest,
+
+- A ``Job`` is another type of controller, ``RBAC`` is "Role-based access control", and objects with "RBAC" in them together implement an [authorization system](https://kubernetes.io/docs/reference/access-authn-authz/rbac/).
+- A [``ConfigMap``](https://kubernetes.io/docs/concepts/configuration/configmap/) "is an API object used to store non-confidential data in key-value pairs".
+- A validating admission webhook receives and responds to admission requests. They are aptly configured by [objects](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/#configure-admission-webhooks-on-the-fly) of ``kind: ValidatingWebhookConfiguration``.
+
+Note that the ``ingress-nginx-controller`` is actually a ``Service`` of type ``LoadBalancer``!
+
+```console
+$ kubectl get service ingress-nginx-controller -n ingress-nginx -o yaml | tail
+    protocol: TCP
+    targetPort: https
+  selector:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: ingress-nginx
+    app.kubernetes.io/name: ingress-nginx
+  sessionAffinity: None
+  type: LoadBalancer
+status:
+  loadBalancer: {}
+```
+
+Indeed, it would have been more accurate to say that the load-balancing aspect of an ``Ingress`` is built on top of a concrete ``LoadBalancer`` service. According to [AWS documentation](https://aws.amazon.com/blogs/opensource/network-load-balancer-nginx-ingress-controller-eks/):
+
+> An Ingress controller does not typically eliminate the need for an external load balancer, it simply adds an additional layer of routing and control behind the load balancer.
+
+And from a [Reddit comment](https://www.reddit.com/r/kubernetes/comments/17q03f2/comment/k88ufju/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button) (yes, not the best source),
+
+> Ingress operates on layer 7 while Services work on layer 3 and 4. _[Layer 3 = IP, Layer 4 = TCP/ UDP, Layer 7 = HTTP(S)]_
+
+Alternatively, we get slightly different output when setting these up with ``Helm`` (in particular it's easier to _uninstall_ everything using Helm):
+
+```console
+$ helm upgrade --install ingress-nginx ingress-nginx \
+--repo https://kubernetes.github.io/ingress-nginx \
+--namespace ingress-nginx --create-namespace
+
+Release "ingress-nginx" does not exist. Installing it now.
+NAME: ingress-nginx
+LAST DEPLOYED: Sun Dec 15 11:20:05 2024
+NAMESPACE: ingress-nginx
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+The ingress-nginx controller has been installed.
+It may take a few minutes for the load balancer IP to be available.
+You can watch the status by running 'kubectl get service --namespace ingress-nginx ingress-nginx-controller --output wide --watch'
+
+An example Ingress that makes use of the controller:
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata:
+    name: example
+    namespace: foo
+  spec:
+    ingressClassName: nginx
+    rules:
+      - host: www.example.com
+        http:
+          paths:
+            - pathType: Prefix
+              backend:
+                service:
+                  name: exampleService
+                  port:
+                    number: 80
+              path: /
+    # This section is only required if TLS is to be enabled for the Ingress
+    tls:
+      - hosts:
+        - www.example.com
+        secretName: example-tls
+
+If TLS is enabled for the Ingress, a Secret containing the certificate and key must also be provided:
+
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: example-tls
+    namespace: foo
+  data:
+    tls.crt: <base64 encoded cert>
+    tls.key: <base64 encoded key>
+  type: kubernetes.io/tls
+```
+
+The output here doesn't list what's created, but it highlights the fact that we have created the IngressClass but not the Ingress. In fact, we have a controller pod but not the controller itself:
+
+```console
+$ kubectl get pods -n ingress-nginx
+NAME                                        READY   STATUS    RESTARTS   AGE
+ingress-nginx-controller-6cbbbb99d7-sj9n9   1/1     Running   0          3m59s
+```
+
+Still following the [guide](https://kubernetes.github.io/ingress-nginx/deploy/#firewall-configuration), there are a few ports that should be open on the pod. I wrote its information to a file ``nginx-pod.yaml`` and one can search for 80, 443, and 8443.
+
+```bash
+kubectl -n ingress-nginx get pod -o yaml > ./networking/nginx-pod.yaml
+```
+
+We now deploy a web server and expose it as in the previous seciton.
+
+```console
+$ kubectl create deployment demo --image=httpd --port=80 -n ingress-nginx
+deployment.apps/demo created
+
+$ kubectl expose deployment demo -n ingress-nginx
+service/demo exposed
+```
+
+At this point there are two pods and three services (the ``demo``s were newly added):
+
+```console
+$ kubectl get pods -n ingress-nginx
+NAME                                        READY   STATUS    RESTARTS   AGE
+demo-654c477f6d-s7vbd                       1/1     Running   0          5m20s
+ingress-nginx-controller-6cbbbb99d7-sj9n9   1/1     Running   0          6h22m
+
+# kubectl get services -n ingress-nginx
+NAME                                 TYPE           CLUSTER-IP      EXTERNAL-IP   PORT(S)                      AGE
+demo                                 ClusterIP      10.99.242.165   <none>        80/TCP                       4m46s
+ingress-nginx-controller             LoadBalancer   10.111.165.45   <pending>     80:32421/TCP,443:31142/TCP   6h22m
+ingress-nginx-controller-admission   ClusterIP      10.100.44.58    <none>        443/TCP                      6h22m
+```
+
+Note however that the ``LoadBalancer``'s ``External-IP`` field says "pending". There's perhaps an air of disdain in the [documentation](https://kubernetes.github.io/ingress-nginx/deploy/#online-testing) about this:
+
+```text
+If your Kubernetes cluster is a "real" cluster that supports services of type LoadBalancer, it will have allocated an external IP address or FQDN to the ingress controller... If that field shows <pending>, this means that your Kubernetes cluster wasn't able to provision the load balancer.
+```
+
+Yes, I tried this out myself by deleting ``ingress-nginx-controller`` . Fortunately, I can copy the relevant parts in ``.networking/ingress.yaml`` and apply it again with a here string (``<<<``):
+
+```bash
+kubectl apply -f - <<< "apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: ingress-nginx
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+    app.kubernetes.io/version: 1.12.0-beta.0
+  name: ingress-nginx-controller
+  namespace: ingress-nginx
+spec:
+  externalTrafficPolicy: Local
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - appProtocol: http
+    name: http
+    port: 80
+    protocol: TCP
+    targetPort: http
+  - appProtocol: https
+    name: https
+    port: 443
+    protocol: TCP
+    targetPort: https
+  selector:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: ingress-nginx
+    app.kubernetes.io/name: ingress-nginx
+  type: LoadBalancer"
+```
+
+At face value, that means with ``Minikube``'s puny setup, we'll not be able to reach the server from the public network. But Minikube has [got us covered](https://minikube.sigs.k8s.io/docs/handbook/accessing/#loadbalancer-access)!
+
+![minikube-tunnel](pics/minikube-tunnel.png)
+
+After entering the admin password, the process blocks while traffic is forwarded. However, if we send ``Ctrl-Z`` to move it to the background or start a new terminal (or use K9s :smile:), we can see the EXTERNAL-IP being filled now:
+
+```console
+$ kubectl get services -n ingress-nginx
+NAME                                 TYPE           CLUSTER-IP      EXTERNAL-IP   PORT(S)                      AGE
+demo                                 ClusterIP      10.99.242.165   <none>        80/TCP                       4h1m
+ingress-nginx-controller             LoadBalancer   10.111.165.45   127.0.0.1     80:32421/TCP,443:31142/TCP   10h
+ingress-nginx-controller-admission   ClusterIP      10.100.44.58    <none>        443/TCP                      10h
+```
+
+Finally, we create the ingress resource. The asterisk ``*`` means that all paths are directed to the same service and port (see the [man page](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_create/kubectl_create_ingress/)):
+
+```console
+$ kubectl create ingress demo --class=nginx --rule="www.demo.io/*=demo:80" -n ingress-nginx
+ingress.networking.k8s.io/demo created
+
+$ kubectl get ingress -n ingress-nginx
+NAME             CLASS   HOSTS              ADDRESS     PORTS   AGE
+demo-localhost   nginx   demo.localdev.me   127.0.0.1   80      63m
+
+$ kubectl get ingress demo-localhost -o yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  creationTimestamp: "2024-12-15T04:57:08Z"
+  generation: 1
+  name: demo-localhost
+  namespace: default
+  resourceVersion: "39354"
+  uid: 3b44a504-bf49-4501-93e0-554e5f508904
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: demo.localdev.me
+    http:
+      paths:
+      - backend:
+          service:
+            name: demo
+            port:
+              number: 80
+        path: /
+        pathType: Prefix
+status:
+  loadBalancer: {}
+
+```
+
+We then add ``www.demo.io`` to ``etc/hosts`` (basically a backup DNS lookup file):
+
+```console
+$ sudo -- sh -c "echo \"127.0.0.1\twww.demo.io\" >> /etc/hosts"
+[sudo] password for kxiao1: 
+
+$ tail -n 1 /etc/hosts
+127.0.0.1       www.demo.io
+```
+
+So when we say we want to go to ``www.demo.io``, ``curl`` or a browser will instead go to ``127.0.0.1`` saying that we want ``www.demo.io``.
+
+Using ``curl``, we can achieve the same effect of connecting to 127.0.0.1 while pretending[^1] to connect to an external website (i.e. this goes into the body). For [local testing] (<https://kubernetes.github.io/ingress-nginx/deploy/#local-testing>), we also use port-forwarding to simulate the external->internal transfer.
+
+```console
+$ kubectl create ingress demo-localhost --class=nginx --rule="demo.localdev.me/*=demo:80" -n ingress-nginx
+ingress.networking.k8s.io/demo-localhost created
+
+$ kubectl port-forward --namespace=ingress-nginx service/ingress-nginx-controller 8080:80
+
+# curl --resolve demo.localdev.me:8080:127.0.0.1 http://demo.localdev.me:8080
+<html><body><h1>It works!</h1></body></html>
+```
+
+[^1]: Why is the "pretending" needed? [1](https://serverfault.com/questions/942430/why-does-typing-an-ip-address-instead-of-the-corresponding-domain-name-not-show), [2](https://superuser.com/questions/1810856/can-you-go-to-a-website-by-typing-the-ip-address-into-the-address-bar)
 
 ### Extending Kubernetes
 
@@ -311,7 +614,7 @@ Custom controllers seem to be optional, unless you want to do something addition
 __The Controller will normally run outside of the control plane__, much as you would run any containerized application.  
 For example, you can run the controller in your cluster as a Deployment.
 
-For reference, Kubernetes' built-in controllers include Deployment, ReplicaSet, and StatefulSet. See [Workload Management](https://kubernetes.io/docs/concepts/workloads/controllers/).
+For reference, Kubernetes' built-in controllers include Deployment, ReplicaSet, Job, and so on. See [Workload Management](https://kubernetes.io/docs/concepts/workloads/controllers/).
 
 ## Helm
 
@@ -369,7 +672,7 @@ helm uninstall mysql-1733020493
 helm get -h
 ```
 
-### Actual tutorial ([ref](<https://helm.sh/docs/chart_template_guide/getting_started/>))
+### Actual tutorial ([ref](https://helm.sh/docs/chart_template_guide/getting_started/))
 
 ```bash
 helm create mychart
