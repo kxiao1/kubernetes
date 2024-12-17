@@ -452,26 +452,28 @@ kubectl -n ingress-nginx get pod -o yaml > ./networking/nginx-pod.yaml
 We now deploy a web server and expose it as in the previous seciton.
 
 ```console
-$ kubectl create deployment demo --image=httpd --port=80 -n ingress-nginx
+$ kubectl create deployment demo --image=httpd --port=80
 deployment.apps/demo created
 
-$ kubectl expose deployment demo -n ingress-nginx
+$ kubectl expose deployment demo
 service/demo exposed
 ```
 
-At this point there are two pods and three services (the ``demo``s were newly added):
+At this point there are two pods and three services, with the ``demo``s living in the default namespace. (_Note to future self: I had to regenerate the output because I tried to deploy the server in the ``ingress-nginx`` namespace, leading to frustrating bugs later on..._)
 
 ```console
-$ kubectl get pods -n ingress-nginx
-NAME                                        READY   STATUS    RESTARTS   AGE
-demo-654c477f6d-s7vbd                       1/1     Running   0          5m20s
-ingress-nginx-controller-6cbbbb99d7-sj9n9   1/1     Running   0          6h22m
+$ kubectl get pods --all-namespaces
+NAMESPACE              NAME                                         READY   STATUS    RESTARTS   AGE
+default                demo-654c477f6d-fgbhs                        1/1     Running   0          52s
+ingress-nginx          ingress-nginx-controller-6488564696-z6hhz    1/1     Running   1          82m
+...
 
 # kubectl get services -n ingress-nginx
-NAME                                 TYPE           CLUSTER-IP      EXTERNAL-IP   PORT(S)                      AGE
-demo                                 ClusterIP      10.99.242.165   <none>        80/TCP                       4m46s
-ingress-nginx-controller             LoadBalancer   10.111.165.45   <pending>     80:32421/TCP,443:31142/TCP   6h22m
-ingress-nginx-controller-admission   ClusterIP      10.100.44.58    <none>        443/TCP                      6h22m
+NAMESPACE              NAME                                 TYPE           CLUSTER-IP      EXTERNAL-IP   PORT(S)                      AGE
+default                kubernetes                           ClusterIP      10.96.0.1       <none>        443/TCP                      157m
+ingress-nginx          ingress-nginx-controller             LoadBalancer   10.98.88.100    127.0.0.1     80:32508/TCP,443:32494/TCP   83m
+ingress-nginx          ingress-nginx-controller-admission   ClusterIP      10.97.140.199   <none>        443/TCP                      83m
+...
 ```
 
 Note however that the ``LoadBalancer``'s ``External-IP`` field says "pending". There's perhaps an air of disdain in the [documentation](https://kubernetes.github.io/ingress-nginx/deploy/#online-testing) about this:
@@ -526,7 +528,6 @@ After entering the admin password, the process blocks while traffic is forwarded
 ```console
 $ kubectl get services -n ingress-nginx
 NAME                                 TYPE           CLUSTER-IP      EXTERNAL-IP   PORT(S)                      AGE
-demo                                 ClusterIP      10.99.242.165   <none>        80/TCP                       4h1m
 ingress-nginx-controller             LoadBalancer   10.111.165.45   127.0.0.1     80:32421/TCP,443:31142/TCP   10h
 ingress-nginx-controller-admission   ClusterIP      10.100.44.58    <none>        443/TCP                      10h
 ```
@@ -534,7 +535,7 @@ ingress-nginx-controller-admission   ClusterIP      10.100.44.58    <none>      
 Finally, we create the ingress resource. The asterisk ``*`` means that all paths are directed to the same service and port (see the [man page](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_create/kubectl_create_ingress/)):
 
 ```console
-$ kubectl create ingress demo --class=nginx --rule="www.demo.io/*=demo:80" -n ingress-nginx
+$ kubectl create ingress demo --class=nginx --rule="demo.io/*=demo:80" -n ingress-nginx
 ingress.networking.k8s.io/demo created
 
 $ kubectl get ingress -n ingress-nginx
@@ -569,19 +570,41 @@ status:
 
 ```
 
-We then add ``www.demo.io`` to ``etc/hosts`` (basically a backup DNS lookup file):
+If for any reason the ingress doesn't work, the [quick and dirty solution](https://github.com/kubernetes/ingress-nginx/issues/5401#issuecomment-617006161) is to delete the configuration and move on:
+
+```bash
+kubectl delete validatingwebhookconfiguration --all -n ingress-nginx
+```
+
+We then add ``demo.io`` to ``etc/hosts`` (basically a backup DNS lookup file). So when we say we want to go to ``demo.io``, ``curl`` or a browser will instead go to ``127.0.0.1`` saying that we want ``demo.io``:
 
 ```console
-$ sudo -- sh -c "echo \"127.0.0.1\twww.demo.io\" >> /etc/hosts"
+$ sudo -- sh -c "echo \"127.0.0.1\tdemo.io\" >> /etc/hosts"
 [sudo] password for kxiao1: 
 
 $ tail -n 1 /etc/hosts
-127.0.0.1       www.demo.io
+127.0.0.1       demo.io
 ```
 
-So when we say we want to go to ``www.demo.io``, ``curl`` or a browser will instead go to ``127.0.0.1`` saying that we want ``www.demo.io``.
+And now...
 
-Using ``curl``, we can achieve the same effect of connecting to 127.0.0.1 while pretending[^1] to connect to an external website (i.e. this goes into the body). For [local testing] (<https://kubernetes.github.io/ingress-nginx/deploy/#local-testing>), we also use port-forwarding to simulate the external->internal transfer.
+```console
+$ curl demo.io
+<html><body><h1>It works!</h1></body></html>
+
+# firefox
+...
+```
+
+![firefox](pics/firefox.png)
+
+_Be sure to test using WSL's built-in firefox, not Windows firefox! Windows knows nothing about ``etc/hosts``._
+
+Make no mistake, the curl output took almost 2 days to get to! Many things were tried and I _think_ [deploying the ``ingress-nginx-controller`` service in its own namespace](https://stackoverflow.com/a/63167986) was the lifesaver. In other words, follow the tutorial and don't put ``demo`` in the ``ingress-nginx`` namespace!
+
+Using ``curl``, we can achieve the same effect of connecting to 127.0.0.1 while pretending[^1] to connect to an external website (since information about the ``Host`` goes into the request body). For [local testing](https://kubernetes.github.io/ingress-nginx/deploy/#local-testing) without external IP addresses, it is necessary to manually forward public ports to private ports:
+
+> Port-forwarding is not for a production environment use-case. But here we use port-forwarding, to simulate a HTTP request, originating from outside the cluster, to reach the service of the ingress-nginx controller, that is exposed to receive traffic from outside the cluster.
 
 ```console
 $ kubectl create ingress demo-localhost --class=nginx --rule="demo.localdev.me/*=demo:80" -n ingress-nginx
@@ -593,7 +616,9 @@ $ kubectl port-forward --namespace=ingress-nginx service/ingress-nginx-controlle
 <html><body><h1>It works!</h1></body></html>
 ```
 
-[^1]: Why is the "pretending" needed? [1](https://serverfault.com/questions/942430/why-does-typing-an-ip-address-instead-of-the-corresponding-domain-name-not-show), [2](https://superuser.com/questions/1810856/can-you-go-to-a-website-by-typing-the-ip-address-into-the-address-bar)
+Annoyingly, the bug above only affects "online" deployments. Ugh.
+
+[^1]: Why is the "pretending" needed? [1](https://serverfault.com/questions/942430/why-does-typing-an-ip-address-instead-of-the-corresponding-domain-name-not-show), [2](https://superuser.com/questions/1810856/can-you-go-to-a-website-by-typing-the-ip-address-into-the-address-bar), [3](https://stackoverflow.com/questions/5142030/why-does-the-resolved-ip-of-youtube-com-direct-to-google-com), [4](https://stackoverflow.com/questions/5142030/why-does-the-resolved-ip-of-youtube-com-direct-to-google-com), [5](https://superuser.com/questions/710625/how-to-know-the-ip-address-of-a-website)
 
 ### Extending Kubernetes
 
@@ -614,7 +639,7 @@ Custom controllers seem to be optional, unless you want to do something addition
 __The Controller will normally run outside of the control plane__, much as you would run any containerized application.  
 For example, you can run the controller in your cluster as a Deployment.
 
-For reference, Kubernetes' built-in controllers include Deployment, ReplicaSet, Job, and so on. See [Workload Management](https://kubernetes.io/docs/concepts/workloads/controllers/).
+As a reminder, Kubernetes' built-in controllers include Deployment, ReplicaSet, Job, and so on. See [Workload Management](https://kubernetes.io/docs/concepts/workloads/controllers/).
 
 ## Helm
 
@@ -741,3 +766,54 @@ And then in Python:
 from dask.distributed import Client
 client = Client('127.0.0.1:8786')
 ```
+
+## Cleanup
+
+When one is done playing with Kubernetes or wants to start over anew, a combination of commands can be used to delete as many resources as possible:
+
+```console
+$ kubectl delete all --all --all-namespaces
+pod "dask-kubernetes-operator-loc-c9696d67b-f8p77" deleted
+pod "demo-654c477f6d-k2cz6" deleted
+pod "ingress-nginx-controller-6cbbbb99d7-9hqjk" deleted
+pod "coredns-558bd4d5db-p7dgc" deleted
+pod "etcd-minikube" deleted
+pod "kube-apiserver-minikube" deleted
+pod "kube-controller-manager-minikube" deleted
+pod "kube-proxy-rt7f2" deleted
+pod "kube-scheduler-minikube" deleted
+pod "storage-provisioner" deleted
+pod "dashboard-metrics-scraper-7976b667d4-wllcq" deleted
+pod "kubernetes-dashboard-6fcdf4f6d-jl9lx" deleted
+service "demo" deleted
+service "kubernetes" deleted
+service "simple-scheduler" deleted
+service "ingress-nginx-controller" deleted
+service "ingress-nginx-controller-admission" deleted
+service "kube-dns" deleted
+service "dashboard-metrics-scraper" deleted
+service "kubernetes-dashboard" deleted
+daemonset.apps "kube-proxy" deleted
+deployment.apps "dask-kubernetes-operator-loc" deleted
+deployment.apps "demo" deleted
+deployment.apps "ingress-nginx-controller" deleted
+deployment.apps "coredns" deleted
+deployment.apps "dashboard-metrics-scraper" deleted
+deployment.apps "kubernetes-dashboard" deleted
+replicaset.apps "kubernetes-dashboard-6fcdf4f6d" deleted
+
+$ helm uninstall ingress-nginx  --namespace ingress-nginx
+release "ingress-nginx" uninstalled
+
+$ kubectl delete ingress --all -n ingress-nginx
+ingress.networking.k8s.io "demo" deleted
+ingress.networking.k8s.io "demo-localhost" deleted
+
+... go down the list and delete every other object in the same way
+```
+
+Shutting down Minikube is not the solution! It seems to [persist data](https://www.reddit.com/r/kubernetes/comments/fky3i6/does_minikube_cluster_persist_across_machine/) in [volumes](https://docs.docker.com/get-started/docker-concepts/running-containers/persisting-container-data/#container-volumes):
+
+![volume](pics/volume.png)
+
+That's why, three years later, all the clusters will be still there when I revisit the subject again!
